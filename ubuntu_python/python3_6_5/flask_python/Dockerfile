@@ -1,4 +1,4 @@
-FROM eejay73/codenvy-ws-base:python3.6.5-flask
+FROM eejay73/codenvy-ws-base:python3.6.5
 
 ## Default pip installs
 
