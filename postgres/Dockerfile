@@ -1,60 +1,30 @@
 FROM eclipse/stack-base:ubuntu
 
-# Add the PostgreSQL PGP key to verify their Debian packages.
-# It should be the same key as https://www.postgresql.org/media/keys/ACCC4CF8.asc 
-# RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
-
-# Add PostgreSQL's repository. It contains the most recent stable release
-#     of PostgreSQL, ``9.3``.
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ xenial-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-
-RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add
-
-# Update the Ubuntu and PostgreSQL repository indexes
-RUN sudo apt-get update
-
-RUN DEBIAN_FRONTEND=noninteractive apt-get -qy install language-pack-en
-
-ENV LANGUAGE en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LC_ALL en_US.UTF-8
-RUN DEBIAN_FRONTEND=noninteractive locale-gen en_US.UTF-8
-RUN DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
-RUN update-locale LANG=en_US.UTF-8
-
-# Install ``python-software-properties``, ``software-properties-common`` and PostgreSQL 9.3
-#  There are some warnings (in red) that show up during the build. You can hide
-#  them by prefixing each apt-get statement with DEBIAN_FRONTEND=noninteractive
-RUN DEBIAN_FRONTEND=noninteractive apt-get -y -q install python-software-properties software-properties-common
-RUN LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 DEBIAN_FRONTEND=noninteractive apt-get -y -q install postgresql-9.3 postgresql-client-9.3 postgresql-contrib-9.3
-
-# Note: The official Debian and Ubuntu images automatically ``apt-get clean``
-# after each ``apt-get`` 
-
-# Run the rest of the commands as the ``postgres`` user created by the ``postgres-9.3`` package when it was ``apt-get installed``
-USER postgres
-
-# Create a PostgreSQL role named ``docker`` with ``docker`` as the password and
-# then create a database `docker` owned by the ``docker`` role.
-# Note: here we use ``&&\`` to run commands one after the other - the ``\``
-#       allows the RUN command to span multiple lines.
-RUN    /etc/init.d/postgresql start &&\
-    psql --command "CREATE USER docker WITH SUPERUSER PASSWORD 'docker';" &&\
-    createdb -O docker docker
-
-# Adjust PostgreSQL configuration so that remote connections to the
-# database are possible. 
-RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/9.3/main/pg_hba.conf
-
-# And add ``listen_addresses`` to ``/etc/postgresql/9.3/main/postgresql.conf``
-RUN echo "listen_addresses='*'" >> /etc/postgresql/9.3/main/postgresql.conf
-
-# Expose the PostgreSQL port
-EXPOSE 5432
-
-# Add VOLUMEs to allow backup of config, logs and databases
-#VOLUME	["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
-
-# Set the default command to run when starting the container
-CMD ["/usr/lib/postgresql/9.3/bin/postgres", "-D", "/var/lib/postgresql/9.3/main", "-c", "config_file=/etc/postgresql/9.3/main/postgresql.conf"]
-
+USER root
+RUN set -ex; \
+    key='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8'; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    sudo gpg --keyserver ha.pool.sks-keyservers.net --recv-keys "$key"; \
+    sudo gpg --export "$key" > /etc/apt/trusted.gpg.d/postgres.gpg; \
+    rm -r "$GNUPGHOME"; \
+    sudo apt-key list
+ENV PG_MAJOR 9.6
+ENV PG_VERSION 9.6.2-1.pgdg80+1
+RUN sudo echo 'deb http://apt.postgresql.org/pub/repos/apt/ jessie-pgdg main' $PG_MAJOR > /etc/apt/sources.list.d/pgdg.list
+USER user
+RUN sudo apt-get update \
+    && sudo apt-get install -y postgresql-common \
+    && sudo sed -ri 's/#(create_main_cluster) .*$/\1 = false/' /etc/postgresql-common/createcluster.conf \
+    && sudo apt-get install -y \
+	postgresql-$PG_MAJOR=$PG_VERSION \
+	postgresql-contrib-$PG_MAJOR=$PG_VERSION \
+    && sudo rm -rf /var/lib/apt/lists/*
+RUN sudo mv -v /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample /usr/share/postgresql/ \
+    && sudo ln -sv ../postgresql.conf.sample /usr/share/postgresql/$PG_MAJOR/ \
+    && sudo sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/share/postgresql/postgresql.conf.sample
+RUN sudo mkdir -p /var/run/postgresql && sudo chown -R postgres:postgres /var/run/postgresql && sudo chmod g+s /var/run/postgresql
+ENV PATH /usr/lib/postgresql/$PG_MAJOR/bin:$PATH
+ENV PGDATA /var/lib/postgresql/data
+RUN sudo mkdir -p "$PGDATA" && sudo chown -R postgres:postgres "$PGDATA" && sudo chmod 777 "$PGDATA"
+VOLUME /var/lib/postgresql/data
+CMD sudo pg_createcluster 9.6 main --start && sudo service postgresql start & tail -f /dev/null
