@@ -1,2 +1,3 @@
 FROM postgres:10-alpine
-RUN apt-get update && apt-get install curl rsync -y && apt-get -y clean
+
+RUN apt-get update && apt-get install postgresql-10 -y && apt-get -y clean
